@@ -10,7 +10,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     
     scene = new QGraphicsScene(this);
     scene->setBackgroundBrush(Qt::black);
-    scene->setSceneRect(-50000, -50000, 100000, 100000);
+    // Делаем сцену огромной, чтобы хватило места до Нептуна и комет
+    scene->setSceneRect(-500000, -500000, 1000000, 1000000);
 
     view = new InteractiveView(scene, this);
     mainLayout->addWidget(view, 1); 
@@ -27,7 +28,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     connect(btnReset, &QPushButton::clicked, this, &MainWindow::resetSimulation);
     controlsLayout->addWidget(btnReset);
 
-    // Группа 2: Файлы (Новые кнопки)
+    // Группа 2: Файлы
     btnSave = new QPushButton("Save...", this);
     connect(btnSave, &QPushButton::clicked, this, &MainWindow::saveSimulation);
     controlsLayout->addWidget(btnSave);
@@ -55,7 +56,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     setCentralWidget(centralWidget);
     
     resize(1024, 768);
-    setWindowTitle("Solar Orbital Simulator (MVP) - Save/Load System");
+    setWindowTitle("Solar Orbital Simulator (MVP) - Full Solar System");
 
     // --- 2. Логика ---
     setupSystem();
@@ -75,40 +76,93 @@ void MainWindow::clearSystem() {
     physics.bodies.clear();
 }
 
-// Эта функция создает "шарики" на экране для всех тел, которые есть в физическом движке
+// Создание визуальных объектов (шариков)
 void MainWindow::createVisuals() {
     for (const auto& body : physics.bodies) {
-        double visualSize = 10.0;
-        if (body.name == "Sun") visualSize = 30.0;
-        else if (body.name == "Mars") visualSize = 8.0;
+        double visualSize = 6.0; // Размер по умолчанию (астероиды)
+
+        // Настройка размера точек (пиксели)
+        if (body.name == "Sun") visualSize = 40.0;
+        else if (body.name == "Jupiter") visualSize = 18.0;
+        else if (body.name == "Saturn") visualSize = 16.0;
+        else if (body.name == "Uranus" || body.name == "Neptune") visualSize = 12.0;
+        else if (body.name == "Earth" || body.name == "Venus") visualSize = 9.0;
+        else if (body.name == "Mercury" || body.name == "Mars") visualSize = 7.0;
+        else if (body.name == "Halley's Comet") visualSize = 5.0;
 
         QGraphicsEllipseItem* item = scene->addEllipse(
             -visualSize/2, -visualSize/2, visualSize, visualSize, 
             Qt::NoPen, QBrush(body.color)
         );
+        
+        // Всплывающая подсказка при наведении мыши
         item->setToolTip(body.name);
-        item->setFlag(QGraphicsItem::ItemIgnoresTransformations, false); 
+        
+        // ВАЖНО: Эта настройка делает так, что при зуме размер точки в пикселях не меняется.
+        // Это позволяет видеть Плутон, даже если зум очень маленький (вид всей системы).
+        item->setFlag(QGraphicsItem::ItemIgnoresTransformations, true); 
+        
         bodyItems.push_back(item);
     }
-    drawBodies(); // Сразу ставим их на места
+    drawBodies(); // Сразу расставляем по местам
 }
 
+// Инициализация Солнечной системы
 void MainWindow::setupSystem() {
     clearSystem();
 
-    // Стандартные данные
+    // --- 1. Солнце ---
     double mSun = 1.989e30;
-    double mEarth = 5.972e24;
-    double distEarth = 1.496e11; 
-    double vEarth = 29780.0;     
-
     physics.addBody(CelestialBody("Sun", mSun, 696340000, Qt::yellow, {0, 0}, {0, 0}));
-    physics.addBody(CelestialBody("Earth", mEarth, 6371000, Qt::blue, {distEarth, 0}, {0, vEarth}));
-    
-    double mMars = 6.39e23;
-    double distMars = 2.279e11; 
-    double vMars = 24077.0;     
-    physics.addBody(CelestialBody("Mars", mMars, 3389500, Qt::red, {distMars, 0}, {0, vMars}));
+
+    // --- 2. Планеты земной группы ---
+    // Меркурий
+    physics.addBody(CelestialBody("Mercury", 3.301e23, 2439700, Qt::lightGray, 
+                                  {5.79e10, 0}, {0, 47400}));
+    // Венера
+    physics.addBody(CelestialBody("Venus", 4.867e24, 6051800, QColor("#e3bb76"), 
+                                  {1.082e11, 0}, {0, 35020}));
+    // Земля
+    physics.addBody(CelestialBody("Earth", 5.972e24, 6371000, Qt::blue, 
+                                  {1.496e11, 0}, {0, 29780}));
+    // Марс
+    physics.addBody(CelestialBody("Mars", 6.417e23, 3389500, Qt::red, 
+                                  {2.279e11, 0}, {0, 24070}));
+
+    // --- 3. Астероиды (Главный пояс) ---
+    // Церера
+    physics.addBody(CelestialBody("Ceres", 9.39e20, 473000, Qt::gray, 
+                                  {4.14e11, 0}, {0, 17900}));
+    // Веста
+    physics.addBody(CelestialBody("Vesta", 2.59e20, 262700, Qt::darkGray, 
+                                  {3.53e11, 0}, {0, 19300}));
+    // Паллада
+    physics.addBody(CelestialBody("Pallas", 2.11e20, 256000, Qt::darkGray, 
+                                  {4.14e11, 0}, {0, 17600}));
+
+    // --- 4. Планеты-гиганты ---
+    // Юпитер
+    physics.addBody(CelestialBody("Jupiter", 1.898e27, 69911000, QColor("#d8ca9d"), 
+                                  {7.786e11, 0}, {0, 13070}));
+    // Сатурн
+    physics.addBody(CelestialBody("Saturn", 5.683e26, 58232000, QColor("#ead6b8"), 
+                                  {1.433e12, 0}, {0, 9690}));
+    // Уран
+    physics.addBody(CelestialBody("Uranus", 8.681e25, 25362000, QColor("#d1e7e7"), 
+                                  {2.872e12, 0}, {0, 6800}));
+    // Нептун
+    physics.addBody(CelestialBody("Neptune", 1.024e26, 24622000, QColor("#5b5ddf"), 
+                                  {4.495e12, 0}, {0, 5430}));
+
+    // --- 5. Транснептуновые объекты и Кометы ---
+    // Плутон (Карликовая планета)
+    physics.addBody(CelestialBody("Pluto", 1.309e22, 1188300, QColor("#968570"), 
+                                  {4.437e12, 0}, {0, 6100}));
+
+    // Комета Галлея (Сильно вытянутая орбита)
+    // Перигелий (~0.58 АЕ от Солнца)
+    physics.addBody(CelestialBody("Halley's Comet", 2.2e14, 5500, Qt::white, 
+                                  {8.78e10, 0}, {0, 54500}));
 
     createVisuals();
 }
@@ -154,7 +208,7 @@ void MainWindow::drawBodies() {
 // --- ЛОГИКА СОХРАНЕНИЯ ---
 void MainWindow::saveSimulation() {
     bool wasRunning = timer->isActive();
-    if (wasRunning) timer->stop(); // Пауза при сохранении
+    if (wasRunning) timer->stop(); 
 
     QString fileName = QFileDialog::getSaveFileName(this, "Save Simulation", "", "JSON Files (*.json)");
     
@@ -166,9 +220,8 @@ void MainWindow::saveSimulation() {
             obj["name"] = body.name;
             obj["mass"] = body.mass;
             obj["radius"] = body.radius;
-            obj["color"] = body.color.name(); // Сохраняем цвет как HEX строку (#FFFF00)
+            obj["color"] = body.color.name(); 
             
-            // Сохраняем векторы
             obj["posX"] = body.position.x();
             obj["posY"] = body.position.y();
             obj["velX"] = body.velocity.x();
@@ -206,7 +259,7 @@ void MainWindow::loadSimulation() {
             QJsonObject root = doc.object();
             
             if (root.contains("bodies") && root["bodies"].isArray()) {
-                clearSystem(); // Удаляем текущие планеты
+                clearSystem(); 
                 
                 QJsonArray bodiesArray = root["bodies"].toArray();
                 for (const auto& val : bodiesArray) {
@@ -223,7 +276,7 @@ void MainWindow::loadSimulation() {
                     physics.addBody(CelestialBody(name, mass, radius, color, pos, vel));
                 }
                 
-                createVisuals(); // Создаем графику для загруженных планет
+                createVisuals(); 
                 view->centerOn(0,0);
             }
         }
