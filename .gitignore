@@ -97,6 +97,26 @@ vcpkg.json.user
 **/tools总理/
 **/.DS_Store
 
+# Qt deployment/export folders (contain generated files for distribution)
+qt_export*/
+qt_export_new*/
+**/vcpkg-export-*/
+
+# Qt build artifacts and meta files
+**.qt/
+**/*_autogen/
+**/*.dir/
+**/vcpkg-manifest-install.log
+
+# Generated reports and documentation
+COMPILATION_REPORT.md
+BUILD_*.md
+
+# Windows specific build artifacts
+**/*.pdb
+**/*.idb
+**/*.ilk
+
 # Eigen3 (common mathematical library)
 *.cache
 *.tmp
