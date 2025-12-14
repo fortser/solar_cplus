@@ -10,8 +10,8 @@ TEST(PhysicsTest, GravitationalForceCalculation) {
     double m2 = 2.0e5; // 200 тонн
     double dist = 2000.0; // 2000 метров (больше лимита в 1000м)
     
-    physics.addBody(CelestialBody("Obj1", m1, 1, Qt::white, {0, 0}, {0, 0}));
-    physics.addBody(CelestialBody("Obj2", m2, 1, Qt::white, {dist, 0}, {0, 0}));
+    physics.addBody(CelestialBody("Obj1", m1, 1, Qt::white, {0, 0, 0}, {0, 0, 0}));
+    physics.addBody(CelestialBody("Obj2", m2, 1, Qt::white, {dist, 0, 0}, {0, 0, 0}));
     
     // Делаем микро-шаг
     physics.step(1e-9); 
@@ -35,7 +35,7 @@ TEST(PhysicsTest, IntegrationMovement) {
     PhysicsEngine physics;
     
     // Тело летит со скоростью 10 м/с вправо
-    physics.addBody(CelestialBody("Runner", 10, 1, Qt::white, {0, 0}, {10, 0}));
+    physics.addBody(CelestialBody("Runner", 10, 1, Qt::white, {0, 0, 0}, {10, 0, 0}));
     
     // Шагаем 1 секунду
     physics.step(1.0);

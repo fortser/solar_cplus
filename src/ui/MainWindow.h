@@ -6,11 +6,13 @@
 #include <QSlider>
 #include <QLabel>
 #include <QHBoxLayout>
+#include <QComboBox> // <-- Новый
+#include <QCheckBox> // <-- Новый
 #include <QFileDialog>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
-#include <QGraphicsSimpleTextItem> // Для текста на карте
+#include <QGraphicsSimpleTextItem>
 #include "../core/PhysicsEngine.h"
 #include "InteractiveView.h"
 
@@ -25,12 +27,13 @@ private slots:
     void toggleSimulation();
     void resetSimulation();
     void onSpeedChanged(int val);
-    
     void saveSimulation();
     void loadSimulation();
-    
-    // Слот для отслеживания наведения мыши (опционально можно расширить)
     void onSelectionChanged();
+    
+    // Новые слоты настроек
+    void onIntegratorChanged(int index);
+    void onRelativityToggled(bool checked);
 
 private:
     PhysicsEngine physics;
@@ -39,27 +42,26 @@ private:
     InteractiveView* view;
     QTimer* timer;
 
-    // Кнопки
     QPushButton* btnPlayPause;
     QPushButton* btnReset;
     QPushButton* btnSave; 
     QPushButton* btnLoad; 
-    // Новые кнопки зума
     QPushButton* btnZoomIn;
     QPushButton* btnZoomOut;
 
     QSlider* sliderSpeed;
     QLabel* labelSpeed;
-    
-    // Новая метка для инфо
     QLabel* labelInfo;
+    
+    // Новые контролы
+    QComboBox* comboIntegrator;
+    QCheckBox* checkRelativity;
 
     double scaleFactor = 100.0 / 1.496e11; 
     double baseTimeStep = 3600 * 24;       
     double currentSpeedMultiplier = 1.0;   
 
     std::vector<QGraphicsEllipseItem*> bodyItems;
-    // Вектор для текстовых подписей (имен планет)
     std::vector<QGraphicsSimpleTextItem*> nameLabels;
 
     void setupSystem();    

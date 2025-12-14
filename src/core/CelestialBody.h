@@ -5,16 +5,16 @@
 
 struct CelestialBody {
     QString name;
-    double mass;       // Масса в кг
-    double radius;     // Радиус тела (для отрисовки)
+    double mass;       
+    double radius;     
     QColor color;
 
-    // Векторы состояния (используем 2D для MVP)
-    Eigen::Vector2d position;     // Позиция (м)
-    Eigen::Vector2d velocity;     // Скорость (м/с)
-    Eigen::Vector2d acceleration; // Ускорение (м/с^2)
+    // Векторы состояния теперь 3D (x, y, z)
+    Eigen::Vector3d position;     
+    Eigen::Vector3d velocity;     
+    Eigen::Vector3d acceleration; 
 
-    CelestialBody(QString n, double m, double r, QColor c, Eigen::Vector2d pos, Eigen::Vector2d vel)
+    CelestialBody(QString n, double m, double r, QColor c, Eigen::Vector3d pos, Eigen::Vector3d vel)
         : name(n), mass(m), radius(r), color(c), position(pos), velocity(vel) {
         acceleration.setZero();
     }
