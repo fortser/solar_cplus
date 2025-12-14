@@ -38,6 +38,7 @@ set(SOURCES
     src/ui/MainWindow.cpp
     # Header files are included for IDE visibility
     src/ui/MainWindow.h
+    src/ui/InteractiveView.h  # <--- Новый файл для Зума
     src/core/CelestialBody.h
     src/core/PhysicsEngine.h
 )

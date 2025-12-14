@@ -1,13 +1,18 @@
 #pragma once
 #include <QMainWindow>
 #include <QGraphicsScene>
-#include <QGraphicsView>
 #include <QTimer>
 #include <QPushButton>
 #include <QSlider>
 #include <QLabel>
 #include <QHBoxLayout>
+#include <QFileDialog>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QMessageBox>
 #include "../core/PhysicsEngine.h"
+#include "InteractiveView.h"
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -16,33 +21,37 @@ public:
     MainWindow(QWidget *parent = nullptr);
 
 private slots:
-    void updateSimulation();      // Вызывается таймером
-    void toggleSimulation();      // Кнопка Старт/Пауза
-    void resetSimulation();       // Кнопка Сброс
-    void onSpeedChanged(int val); // Изменение слайдера
+    void updateSimulation();
+    void toggleSimulation();
+    void resetSimulation();
+    void onSpeedChanged(int val);
+    
+    // Новые слоты для файлов
+    void saveSimulation();
+    void loadSimulation();
 
 private:
     PhysicsEngine physics;
     
     QGraphicsScene* scene;
-    QGraphicsView* view;
+    InteractiveView* view;
     QTimer* timer;
 
-    // Элементы управления
     QPushButton* btnPlayPause;
     QPushButton* btnReset;
+    QPushButton* btnSave; // Новая кнопка
+    QPushButton* btnLoad; // Новая кнопка
     QSlider* sliderSpeed;
     QLabel* labelSpeed;
 
-    // Параметры симуляции
-    double scaleFactor = 100.0 / 1.496e11; // 100 пикс = 1 АЕ
-    double baseTimeStep = 3600 * 24;       // 1 день (секунд)
-    double currentSpeedMultiplier = 1.0;   // Множитель скорости
+    double scaleFactor = 100.0 / 1.496e11; 
+    double baseTimeStep = 3600 * 24;       
+    double currentSpeedMultiplier = 1.0;   
 
-    // Визуальные элементы
     std::vector<QGraphicsEllipseItem*> bodyItems;
 
-    void setupSystem();    // Создание тел
-    void clearSystem();    // Очистка перед сбросом
-    void drawBodies();     // Обновление графики
+    void setupSystem();    // Создание стандартной системы (Земля/Марс)
+    void clearSystem();    // Очистка
+    void createVisuals();  // Создание графики для тел, которые уже есть в physics
+    void drawBodies();     // Обновление позиций
 };

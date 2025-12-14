@@ -1,7 +1,6 @@
 {
   "dependencies": [
     "qtbase",
-    "qttools",
     "eigen3"
   ]
 }
