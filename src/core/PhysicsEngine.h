@@ -1,6 +1,7 @@
 #pragma once
 #include <vector>
 #include <cmath>
+#include <omp.h>
 #include "CelestialBody.h"
 
 enum class IntegratorType {
@@ -11,11 +12,10 @@ enum class IntegratorType {
 class PhysicsEngine {
 public:
     const double G = 6.67430e-11;
-    const double C = 299792458.0; // Скорость света
+    const double C = 299792458.0; 
 
     std::vector<CelestialBody> bodies;
     
-    // Настройки
     IntegratorType currentIntegrator = IntegratorType::Verlet;
     bool useRelativity = false;
 
@@ -32,120 +32,157 @@ public:
     }
 
 private:
-    // --- Метод Верле (Velocity Verlet) ---
-    void stepVerlet(double dt) {
-        // 1. Позиция
-        for (auto& body : bodies) {
-            body.position += body.velocity * dt + 0.5 * body.acceleration * dt * dt;
-        }
-
-        // 2. Сохраняем старое ускорение
-        std::vector<Eigen::Vector3d> old_acc;
-        for (const auto& body : bodies) old_acc.push_back(body.acceleration);
-
-        // 3. Новое ускорение
-        computeAccelerationsForState(bodies); 
-
-        // 4. Скорость
-        for (size_t i = 0; i < bodies.size(); ++i) {
-            bodies[i].velocity += 0.5 * (old_acc[i] + bodies[i].acceleration) * dt;
-        }
-    }
-
-    // --- Метод Рунге-Кутты 4 (RK4) ---
     struct State {
         Eigen::Vector3d pos;
         Eigen::Vector3d vel;
     };
 
+    // --- БУФЕРЫ ПАМЯТИ ---
+    // Разделяем буферы, чтобы старые данные не перезаписывались новыми
+    std::vector<Eigen::Vector3d> m_accBuffer;     // Для расчета текущих сил
+    std::vector<Eigen::Vector3d> m_oldAccBuffer;  // Специально для Verlet (хранит a(t))
+    
+    // Буферы для RK4
+    std::vector<State> m_stateBuffer;         
+    std::vector<Eigen::Vector3d> m_kAccBuffer;
+
+    // --- Velocity Verlet (Стабильный) ---
+    void stepVerlet(double dt) {
+        int n = (int)bodies.size();
+        
+        // 1. r(t+dt) = r(t) + v(t)dt + 0.5 * a(t) * dt^2
+        #pragma omp parallel for
+        for (int i = 0; i < n; ++i) {
+            bodies[i].position += bodies[i].velocity * dt + 0.5 * bodies[i].acceleration * dt * dt;
+        }
+
+        // 2. Сохраняем a(t) в отдельный буфер перед пересчетом
+        if (m_oldAccBuffer.size() != n) m_oldAccBuffer.resize(n);
+        
+        #pragma omp parallel for
+        for (int i = 0; i < n; ++i) m_oldAccBuffer[i] = bodies[i].acceleration;
+
+        // 3. Считаем a(t+dt). 
+        // ВНИМАНИЕ: Это пишет в m_accBuffer, но не трогает m_oldAccBuffer!
+        computeAccelerationsForState(bodies); 
+
+        // 4. v(t+dt) = v(t) + 0.5 * (a(t) + a(t+dt)) * dt
+        #pragma omp parallel for
+        for (int i = 0; i < n; ++i) {
+            bodies[i].velocity += 0.5 * (m_oldAccBuffer[i] + bodies[i].acceleration) * dt;
+        }
+    }
+
+    // --- Runge-Kutta 4 (Точный) ---
     void stepRK4(double dt) {
-        size_t n = bodies.size();
-        std::vector<State> y0(n); // Начальное состояние
+        int n = (int)bodies.size();
+        if (m_stateBuffer.size() != n) m_stateBuffer.resize(n);
         
-        for(size_t i=0; i<n; ++i) {
-            y0[i] = {bodies[i].position, bodies[i].velocity};
+        // Начальное состояние
+        #pragma omp parallel for
+        for(int i=0; i<n; ++i) m_stateBuffer[i] = {bodies[i].position, bodies[i].velocity};
+
+        // K1
+        computeAccFromState(m_stateBuffer, m_kAccBuffer); // k1_acc
+        std::vector<Eigen::Vector3d> k1_v = m_kAccBuffer; 
+        std::vector<Eigen::Vector3d> k1_x(n);
+        for(int i=0; i<n; ++i) k1_x[i] = bodies[i].velocity;
+
+        // K2
+        #pragma omp parallel for
+        for(int i=0; i<n; ++i) {
+            m_stateBuffer[i].pos = bodies[i].position + k1_x[i] * (dt / 2.0);
+            m_stateBuffer[i].vel = bodies[i].velocity + k1_v[i] * (dt / 2.0);
         }
+        computeAccFromState(m_stateBuffer, m_kAccBuffer); // k2_acc
+        std::vector<Eigen::Vector3d> k2_v = m_kAccBuffer;
+        std::vector<Eigen::Vector3d> k2_x(n);
+        for(int i=0; i<n; ++i) k2_x[i] = bodies[i].velocity + k1_v[i] * (dt / 2.0);
 
-        // k1
-        auto k1_acc = getAccFromState(y0);
-        std::vector<State> y1(n);
-        for(size_t i=0; i<n; ++i) {
-            y1[i].pos = y0[i].pos + y0[i].vel * (dt / 2.0);
-            y1[i].vel = y0[i].vel + k1_acc[i] * (dt / 2.0);
+        // K3
+        #pragma omp parallel for
+        for(int i=0; i<n; ++i) {
+            m_stateBuffer[i].pos = bodies[i].position + k2_x[i] * (dt / 2.0);
+            m_stateBuffer[i].vel = bodies[i].velocity + k2_v[i] * (dt / 2.0);
         }
+        computeAccFromState(m_stateBuffer, m_kAccBuffer); // k3_acc
+        std::vector<Eigen::Vector3d> k3_v = m_kAccBuffer;
+        std::vector<Eigen::Vector3d> k3_x(n);
+        for(int i=0; i<n; ++i) k3_x[i] = bodies[i].velocity + k2_v[i] * (dt / 2.0);
 
-        // k2
-        auto k2_acc = getAccFromState(y1);
-        std::vector<State> y2(n);
-        for(size_t i=0; i<n; ++i) {
-            y2[i].pos = y0[i].pos + y1[i].vel * (dt / 2.0);
-            y2[i].vel = y0[i].vel + k2_acc[i] * (dt / 2.0);
+        // K4
+        #pragma omp parallel for
+        for(int i=0; i<n; ++i) {
+            m_stateBuffer[i].pos = bodies[i].position + k3_x[i] * dt;
+            m_stateBuffer[i].vel = bodies[i].velocity + k3_v[i] * dt;
         }
+        computeAccFromState(m_stateBuffer, m_kAccBuffer); // k4_acc
+        std::vector<Eigen::Vector3d> k4_v = m_kAccBuffer;
+        std::vector<Eigen::Vector3d> k4_x(n);
+        for(int i=0; i<n; ++i) k4_x[i] = bodies[i].velocity + k3_v[i] * dt;
 
-        // k3
-        auto k3_acc = getAccFromState(y2);
-        std::vector<State> y3(n);
-        for(size_t i=0; i<n; ++i) {
-            y3[i].pos = y0[i].pos + y2[i].vel * dt;
-            y3[i].vel = y0[i].vel + k3_acc[i] * dt;
-        }
-
-        // k4
-        auto k4_acc = getAccFromState(y3);
-
-        // Итоговое обновление
-        for(size_t i=0; i<n; ++i) {
-            bodies[i].position += (dt / 6.0) * (y0[i].vel + 2.0*y1[i].vel + 2.0*y2[i].vel + y3[i].vel);
-            bodies[i].velocity += (dt / 6.0) * (k1_acc[i] + 2.0*k2_acc[i] + 2.0*k3_acc[i] + k4_acc[i]);
+        // Финал
+        #pragma omp parallel for
+        for(int i=0; i<n; ++i) {
+            bodies[i].position += (dt / 6.0) * (k1_x[i] + 2.0*k2_x[i] + 2.0*k3_x[i] + k4_x[i]);
+            bodies[i].velocity += (dt / 6.0) * (k1_v[i] + 2.0*k2_v[i] + 2.0*k3_v[i] + k4_v[i]);
         }
         
-        // Обновляем ускорение для отображения/логики
+        // Обновляем ускорение для следующего шага
         computeAccelerationsForState(bodies);
     }
 
-    // Вспомогательная функция для RK4: расчет ускорений для гипотетического состояния
-    std::vector<Eigen::Vector3d> getAccFromState(const std::vector<State>& states) {
-        size_t n = states.size();
-        std::vector<Eigen::Vector3d> accs(n, Eigen::Vector3d::Zero());
+    // Расчет сил (OpenMP)
+    void computeAccFromState(const std::vector<State>& states, std::vector<Eigen::Vector3d>& results) {
+        int n = (int)states.size();
+        if (results.size() != n) results.resize(n);
 
-        for (size_t i = 0; i < n; ++i) {
-            for (size_t j = i + 1; j < n; ++j) {
+        #pragma omp parallel for schedule(dynamic)
+        for (int i = 0; i < n; ++i) {
+            Eigen::Vector3d currentAcc(0, 0, 0);
+            
+            for (int j = 0; j < n; ++j) {
+                if (i == j) continue; 
+
                 Eigen::Vector3d r_vec = states[j].pos - states[i].pos;
-                double dist = r_vec.norm();
-                if (dist < 1e3) continue;
+                double dist2 = r_vec.squaredNorm(); 
+                
+                // Защита от столкновений (мягкое ядро)
+                if (dist2 < 1e10) continue; 
 
-                double dist2 = dist * dist;
+                double dist = std::sqrt(dist2);
                 double dist3 = dist2 * dist;
                 
-                // Ньютоновская сила F/m = a
-                Eigen::Vector3d a_newton = r_vec * (G / dist3);
+                Eigen::Vector3d a_newton = r_vec * (G * bodies[j].mass / dist3);
                 
-                // --- Релятивистская поправка (Post-Newtonian) ---
-                // Упрощенная модель для прецессии: a = a_newton * (1 + alpha * v^2 / c^2 ...)
-                double correction = 1.0;
                 if (useRelativity) {
-                    // Очень упрощенный член 1PN (достаточен для эффекта прецессии)
                     double v_sq = states[i].vel.squaredNorm(); 
-                    correction = 1.0 + (3.0 * v_sq) / (C * C); 
+                    double correction = 1.0 + (3.0 * v_sq) / (C * C); 
+                    currentAcc += a_newton * correction;
+                } else {
+                    currentAcc += a_newton;
                 }
-
-                accs[i] += a_newton * bodies[j].mass * correction;
-                accs[j] -= a_newton * bodies[i].mass * correction; // Newton's 3rd law (approx)
             }
+            results[i] = currentAcc;
         }
-        return accs;
     }
 
-    // Расчет ускорений для текущих реальных тел (для Verlet)
     void computeAccelerationsForState(std::vector<CelestialBody>& currentBodies) {
-        // Конвертируем bodies в стейт и используем общую логику
-        std::vector<State> states(currentBodies.size());
-        for(size_t i=0; i<currentBodies.size(); ++i) {
-            states[i] = {currentBodies[i].position, currentBodies[i].velocity};
+        int n = (int)currentBodies.size();
+        if (m_stateBuffer.size() != n) m_stateBuffer.resize(n);
+        
+        #pragma omp parallel for
+        for(int i=0; i<n; ++i) {
+            m_stateBuffer[i] = {currentBodies[i].position, currentBodies[i].velocity};
         }
-        auto accs = getAccFromState(states);
-        for(size_t i=0; i<currentBodies.size(); ++i) {
-            currentBodies[i].acceleration = accs[i];
+        
+        // Используем m_accBuffer как временное хранилище
+        if (m_accBuffer.size() != n) m_accBuffer.resize(n);
+        computeAccFromState(m_stateBuffer, m_accBuffer);
+        
+        #pragma omp parallel for
+        for(int i=0; i<n; ++i) {
+            currentBodies[i].acceleration = m_accBuffer[i];
         }
     }
 };

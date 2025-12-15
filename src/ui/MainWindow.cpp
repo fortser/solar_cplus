@@ -5,10 +5,12 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QQuaternion> 
 
 #include <Qt3DExtras/QForwardRenderer>
 #include <Qt3DRender/QCamera>
 #include <Qt3DRender/QCameraLens>
+#include <QFont>
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     // 1. 3D Window
@@ -72,6 +74,19 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     controlsLayout->addSpacing(15);
 
     auto physicsLayout = new QVBoxLayout();
+    
+    auto visualSettingsLayout = new QHBoxLayout();
+    checkShowLabels = new QCheckBox("Labels", this);
+    checkShowLabels->setChecked(true);
+    connect(checkShowLabels, &QCheckBox::toggled, this, &MainWindow::onShowLabelsToggled);
+    visualSettingsLayout->addWidget(checkShowLabels);
+
+    checkShowTrails = new QCheckBox("Trails", this);
+    checkShowTrails->setChecked(true);
+    connect(checkShowTrails, &QCheckBox::toggled, this, &MainWindow::onShowTrailsToggled);
+    visualSettingsLayout->addWidget(checkShowTrails);
+    physicsLayout->addLayout(visualSettingsLayout);
+
     comboIntegrator = new QComboBox(this);
     comboIntegrator->addItem("Verlet (Fast)");
     comboIntegrator->addItem("Runge-Kutta 4 (Precise)");
@@ -97,7 +112,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     mainLayout->addLayout(controlsLayout); 
     setCentralWidget(centralWidget);
     resize(1400, 850);
-    setWindowTitle("Solar Simulator v2.6 - Corrected Picking");
+    setWindowTitle("Solar Simulator v2.9 - Memory Safe");
 
     setupScene();
     setupSystem();
@@ -122,17 +137,16 @@ void MainWindow::setupScene() {
     pointLight->setColor(Qt::white);
     pointLight->setIntensity(1.2f);
     lightEntity->addComponent(pointLight);
+
+    orbitGrid = new OrbitGrid(rootEntity, scaleFactor);
 }
 
-// Простой и надежный метод кликов через QObjectPicker
 void MainWindow::createVisuals() {
     for (size_t i = 0; i < physics.bodies.size(); ++i) {
         auto& body = physics.bodies[i];
         VisualBody3D vb;
         vb.physicsIndex = i;
         vb.entity = new Qt3DCore::QEntity(rootEntity);
-        
-        // Даем объекту имя, чтобы потом найти его
         vb.entity->setObjectName(QString::number(i));
 
         auto mesh = new Qt3DExtras::QSphereMesh();
@@ -155,12 +169,28 @@ void MainWindow::createVisuals() {
         vb.entity->addComponent(vb.transform);
         vb.entity->addComponent(mat);
 
-        // --- Picker (Замена RayCaster) ---
         auto picker = new Qt3DRender::QObjectPicker(vb.entity);
-        picker->setHoverEnabled(false); // Нам нужны только клики
-        // При клике вызываем слот onObjectPicked
+        picker->setHoverEnabled(false);
         connect(picker, &Qt3DRender::QObjectPicker::clicked, this, &MainWindow::onObjectPicked);
         vb.entity->addComponent(picker);
+
+        if (body.name != "Sun") {
+            vb.trail = new OrbitTrail(rootEntity, body.color, 2000); 
+            vb.trail->setEnabled(checkShowTrails->isChecked());
+        } else {
+            vb.trail = nullptr;
+        }
+
+        vb.label = new Qt3DExtras::QText2DEntity(rootEntity);
+        vb.label->setText(body.name);
+        vb.label->setHeight(20); 
+        vb.label->setWidth(100); 
+        vb.label->setColor(Qt::white);
+        vb.label->setFont(QFont("Arial", 10, QFont::Bold));
+        vb.label->setEnabled(checkShowLabels->isChecked());
+        
+        vb.labelTransform = new Qt3DCore::QTransform();
+        vb.label->addComponent(vb.labelTransform);
 
         visualBodies.push_back(vb);
     }
@@ -168,12 +198,8 @@ void MainWindow::createVisuals() {
 }
 
 void MainWindow::onObjectPicked(Qt3DRender::QPickEvent* event) {
-    // Получаем Entity, по которому кликнули
-    // QObjectPicker посылает сигнал, sender() - это picker, parent() - это Entity
     auto entity = qobject_cast<Qt3DCore::QEntity*>(sender()->parent());
-    
     if (entity) {
-        // Мы сохранили индекс в objectName в createVisuals
         bool ok;
         int idx = entity->objectName().toInt(&ok);
         if (ok) {
@@ -199,61 +225,107 @@ void MainWindow::updateInfoPanel() {
 }
 
 void MainWindow::updateVisuals() {
+    trailSkipCounter++;
+    bool updateTrail = (trailSkipCounter >= 3);
+
+    QVector3D cameraPos = view3D->camera()->position();
+
     for (size_t i = 0; i < visualBodies.size(); ++i) {
         auto p = physics.bodies[visualBodies[i].physicsIndex].position;
-        visualBodies[i].transform->setTranslation(QVector3D(p.x()*scaleFactor, p.z()*scaleFactor, p.y()*scaleFactor));
+        
+        float x = (float)(p.x() * scaleFactor);
+        float y = (float)(p.z() * scaleFactor);
+        float z = (float)(p.y() * scaleFactor);
+        QVector3D pos3D(x, y, z);
+
+        visualBodies[i].transform->setTranslation(pos3D);
+
+        if (visualBodies[i].labelTransform) {
+            visualBodies[i].labelTransform->setTranslation(QVector3D(x + 5, y + 10, z));
+            QVector3D direction = cameraPos - pos3D;
+            visualBodies[i].labelTransform->setRotation(QQuaternion::fromDirection(direction, QVector3D(0, 1, 0)));
+        }
+
+        if (updateTrail && visualBodies[i].trail && visualBodies[i].trail->isEnabled()) {
+            visualBodies[i].trail->update(pos3D);
+        }
     }
+
+    if (updateTrail) trailSkipCounter = 0;
 }
 
 void MainWindow::updateSimulation() {
     physics.step(baseTimeStep * currentSpeedMultiplier);
     updateVisuals();
-    // Если объект выбран, обновляем инфо-панель в реальном времени
     if (selectedBodyIndex != -1) updateInfoPanel();
 }
 
-// --- Стандартные функции ---
+// --- ИСПРАВЛЕННАЯ ФУНКЦИЯ ОЧИСТКИ (MEMORY SAFE) ---
 void MainWindow::clearSystem() {
     for (auto& vb : visualBodies) {
-        vb.entity->setParent((Qt3DCore::QEntity*)nullptr);
-        delete vb.entity; 
+        // Безопасное удаление через Qt Event Loop
+        if (vb.entity) {
+            vb.entity->setParent((Qt3DCore::QEntity*)nullptr);
+            vb.entity->deleteLater();
+            vb.entity = nullptr;
+        }
+        if (vb.trail) {
+            vb.trail->setParent((Qt3DCore::QEntity*)nullptr);
+            vb.trail->deleteLater();
+            vb.trail = nullptr;
+        }
+        if (vb.label) {
+            vb.label->setParent((Qt3DCore::QEntity*)nullptr);
+            vb.label->deleteLater();
+            vb.label = nullptr;
+        }
     }
+    
     visualBodies.clear();
     physics.bodies.clear();
     selectedBodyIndex = -1;
     updateInfoPanel();
 }
 
-void MainWindow::zoomIn() { view3D->camera()->translate(QVector3D(0, 0, -50.0f), Qt3DRender::QCamera::DontTranslateViewCenter); }
-void MainWindow::zoomOut() { view3D->camera()->translate(QVector3D(0, 0, 50.0f), Qt3DRender::QCamera::DontTranslateViewCenter); }
+void MainWindow::zoomIn() { 
+    view3D->camera()->translate(QVector3D(0, 0, 50.0f), Qt3DRender::QCamera::DontTranslateViewCenter); 
+}
+void MainWindow::zoomOut() { 
+    view3D->camera()->translate(QVector3D(0, 0, -50.0f), Qt3DRender::QCamera::DontTranslateViewCenter); 
+}
 void MainWindow::resetCamera() {
     view3D->camera()->setPosition(QVector3D(0, 400.0f, 400.0f));
     view3D->camera()->setViewCenter(QVector3D(0, 0, 0));
     view3D->camera()->setUpVector(QVector3D(0, 1, 0));
 }
 
+void MainWindow::onShowLabelsToggled(bool checked) {
+    for (auto& vb : visualBodies) {
+        if (vb.label) vb.label->setEnabled(checked);
+    }
+}
+
+void MainWindow::onShowTrailsToggled(bool checked) {
+    for (auto& vb : visualBodies) {
+        if (vb.trail) vb.trail->setEnabled(checked);
+    }
+}
+
 void MainWindow::setupSystem() {
     clearSystem();
-    // Солнце
     physics.addBody(CelestialBody("Sun", 1.989e30, 696340000, Qt::yellow, {0, 0, 0}, {0, 0, 0}));
-    // Планеты
     physics.addBody(CelestialBody("Mercury", 3.301e23, 2439700, Qt::lightGray, {5.79e10, 0, 0}, {0, 47400, 0}));
     physics.addBody(CelestialBody("Venus", 4.867e24, 6051800, QColor("#e3bb76"), {1.082e11, 0, 0}, {0, 35020, 0}));
     physics.addBody(CelestialBody("Earth", 5.972e24, 6371000, Qt::blue, {1.496e11, 0, 0}, {0, 29780, 0}));
     physics.addBody(CelestialBody("Mars", 6.417e23, 3389500, Qt::red, {2.279e11, 0, 0}, {0, 24070, 0}));
-    // Астероиды
     physics.addBody(CelestialBody("Ceres", 9.39e20, 473000, Qt::gray, {4.14e11, 0, 0}, {0, 17900, 0}));
     physics.addBody(CelestialBody("Vesta", 2.59e20, 262700, Qt::darkGray, {3.53e11, 0, 0}, {0, 19300, 0}));
-    // Гиганты
     physics.addBody(CelestialBody("Jupiter", 1.898e27, 69911000, QColor("#d8ca9d"), {7.786e11, 0, 0}, {0, 13070, 0}));
     physics.addBody(CelestialBody("Saturn", 5.683e26, 58232000, QColor("#ead6b8"), {1.433e12, 0, 0}, {0, 9690, 0}));
     physics.addBody(CelestialBody("Uranus", 8.681e25, 25362000, QColor("#d1e7e7"), {2.872e12, 0, 0}, {0, 6800, 0}));
     physics.addBody(CelestialBody("Neptune", 1.024e26, 24622000, QColor("#5b5ddf"), {4.495e12, 0, 0}, {0, 5430, 0}));
-    // Плутон
     physics.addBody(CelestialBody("Pluto", 1.309e22, 1188300, QColor("#968570"), {4.437e12, 0, 1.3e12}, {0, 6100, 0}));
-    // Комета
     physics.addBody(CelestialBody("Halley's Comet", 2.2e14, 5500, Qt::white, {8.78e10, 0, 0}, {0, 54500, 0}));
-
     createVisuals();
 }
 
